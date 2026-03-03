@@ -153,7 +153,8 @@ actix-web-extras = "0.1.0"
 procfs = { version = "0.18.0", default-features = false }
 # Pyroscope integration
 # Using lib-1.0.1: pprof backend integrated into main crate, uses pprof-pyroscope-fork
-# with signal-safety fix (tikv/pprof-rs#282) — no allocations in signal handler
+# with signal-safety fix (tikv/pprof-rs#282) — no allocations in signal handler.
+# pprof-pyroscope-fork is patched via [patch.crates-io] below to fix SIGPROF SIG_DFL race.
 pyroscope = { git = "https://github.com/grafana/pyroscope-rs", tag = "lib-1.0.1", features = ["backend-pprof-rs"] }
 # Backtrace
 rstack-self = { version = "0.3.0", optional = true }
@@ -312,6 +313,10 @@ walkdir = "2.5.0"
 [patch.crates-io]
 tonic = { git = "https://github.com/qdrant/tonic", branch = "v0.11.0-qdrant" }
 hyper = { git = "https://github.com/qdrant/hyper", branch = "v0.14.26-qdrant" }
+# Fix SIGPROF SIG_DFL race in pprof-pyroscope-fork (unregister_signal_handler restores SIG_DFL
+# instead of setting SIG_IGN, causing process termination from stray SIGPROF during reset cycle).
+# Remove this patch once the fix is released upstream.
+pprof-pyroscope-fork = { git = "https://github.com/tellet-q/pprof-rs", branch = "fix-sigprof-sigdfl-race" }
 
 [[bin]]
 name = "schema_generator"
