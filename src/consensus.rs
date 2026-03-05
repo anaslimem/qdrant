@@ -331,28 +331,54 @@ impl Consensus {
         config: &ConsensusConfig,
         tls_config: Option<ClientTlsConfig>,
     ) -> anyhow::Result<AllPeers> {
-        // Use dedicated transport channel for bootstrapping because of specific timeout
-        let channel = make_grpc_channel(
-            Duration::from_secs(config.bootstrap_timeout_sec),
-            Duration::from_secs(config.bootstrap_timeout_sec),
-            cluster_uri,
-            tls_config,
-        )
-        .await
-        .context("Failed to create timeout channel")?;
-        let mut client = RaftClient::new(channel);
-        let all_peers = client
-            .add_peer_to_known(tonic::Request::new(
-                api::grpc::qdrant::AddPeerToKnownMessage {
-                    uri: current_uri,
-                    port: Some(u32::from(p2p_port)),
-                    id: this_peer_id,
-                },
-            ))
+        const MAX_RETRIES: usize = 3;
+        let mut last_err = None;
+        for attempt in 0..MAX_RETRIES {
+            // Use dedicated transport channel for bootstrapping because of specific timeout
+            let channel = make_grpc_channel(
+                Duration::from_secs(config.bootstrap_timeout_sec),
+                Duration::from_secs(config.bootstrap_timeout_sec),
+                cluster_uri.clone(),
+                tls_config.clone(),
+            )
             .await
-            .context("Failed to add peer to known")?
-            .into_inner();
-        Ok(all_peers)
+            .context("Failed to create timeout channel")?;
+            let mut client = RaftClient::new(channel);
+            let result = client
+                .add_peer_to_known(tonic::Request::new(
+                    api::grpc::qdrant::AddPeerToKnownMessage {
+                        uri: current_uri.clone(),
+                        port: Some(u32::from(p2p_port)),
+                        id: this_peer_id,
+                    },
+                ))
+                .await;
+            match result {
+                Ok(response) => return Ok(response.into_inner()),
+                Err(e) => {
+                    let code = e.code();
+                    let message = e.message().to_string();
+                    last_err = Some((code, message));
+                    let is_cancelled = code == tonic::Code::Cancelled;
+                    if is_cancelled && attempt < MAX_RETRIES - 1 {
+                        log::warn!(
+                            "add_peer_to_known cancelled (attempt {}), retrying in 2s",
+                            attempt + 1
+                        );
+                        sleep(Duration::from_secs(2)).await;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        let (code, message) =
+            last_err.ok_or_else(|| anyhow::anyhow!("No response from add_peer_to_known"))?;
+        Err(anyhow::anyhow!(
+            "Failed to add peer to known ({}): {}",
+            code,
+            message
+        ))
     }
 
     // Re-attach peer to the consensus:

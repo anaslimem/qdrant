@@ -441,8 +441,9 @@ const fn default_tick_period_ms() -> u64 {
 }
 
 // Should not be less than `DEFAULT_META_OP_WAIT` as bootstrapping perform sync. consensus meta operations.
+// Replace-peer flow does RemovePeer + AddPeer, so allow at least 2 * CONSENSUS_META_OP_WAIT.
 const fn default_bootstrap_timeout_sec() -> u64 {
-    15
+    60
 }
 
 const fn default_max_message_queue_size() -> usize {
