@@ -12,6 +12,14 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    services:
+      # Required by lib/edge/python/examples/optimize.py
+      qdrant:
+        image: qdrant/qdrant:v1.17.0
+        ports:
+          - 6333:6333
+          - 6334:6334
+
     steps:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -50,14 +58,24 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate
 
+          pip install requests
           maturin develop --no-default-features --features abi3
 
-      - name: Run Qdrant Edge examples
+      - name: Wait for Qdrant
+        run: curl -sf --retry 30 --retry-delay 1 --retry-all-errors http://localhost:6333 >/dev/null
+
+      - name: Run all Python example scripts
         run: |
           cd lib/edge/python
-
           source .venv/bin/activate
 
-          python examples/demo.py
-          python examples/fusion-query.py
-          python examples/mmr-query.py
+          for fname in examples/*.py; do
+            case "$(basename "$fname")" in
+              __init__.py) continue ;;
+              download_partial.py) continue ;; # Not edge test
+              # optimize.py) continue ;; # FIXME
+            esac
+            echo "::group::Running example: $fname"
+            python "$fname"
+            echo "::endgroup::"
+          done

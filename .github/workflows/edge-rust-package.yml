@@ -13,8 +13,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install Rust
+      - name: Install minimal nightly (only for fmt)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+
+      - name: Install minimal stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Install mold
         uses: rui314/setup-mold@v1
@@ -34,6 +41,35 @@ jobs:
       - name: Amalgamate
         run: lib/edge/publish/amalgamate.py
 
-      - name: Cargo check
+      - name: Prepare data files
         working-directory: lib/edge/publish
-        run: cargo check -p examples
+        run: examples/prepare_facet_snapshot.sh
+
+      - name: Check code formatting
+        if: always()
+        working-directory: lib/edge/publish
+        run: cargo +nightly fmt -p examples -- --check
+
+      - name: Check cargo clippy warnings
+        if: always()
+        working-directory: lib/edge/publish
+        run: |
+          # --no-deps because thare are lot of warning in auto-generated `qdrant-edge` package
+          cargo clippy -p examples --all-targets --no-deps -- -D warnings
+
+      - name: Build and run examples
+        if: always()
+        working-directory: lib/edge/publish
+        run: |
+          cargo build -p examples
+
+          EXAMPLES=$(
+            cargo metadata --format-version 1 --no-deps |
+            jq -r '.packages[] | select(.name == "examples").targets[] | select(.kind[] == "bin").name'
+          )
+
+          for example in $EXAMPLES; do
+            echo "::group::Running example: $example"
+            cargo run -p examples --bin "$example"
+            echo "::endgroup::"
+          done
